@@ -1,0 +1,11 @@
+
+google_secrets.py
+yelp_secrets.py
+__pycache__
+google_cache.json
+yelp_cache.json
+harvested_data.sqlite
+.DS_Store
+
+
+
