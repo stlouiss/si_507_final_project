@@ -2,6 +2,7 @@
 import requests
 import json
 import sqlite3
+import plotly.graph_objects as go
 import google_secrets
 import yelp_secrets
 
@@ -238,28 +239,28 @@ def make_yelp_request_using_cache(yelp_baseurl, search_term):
 
 
 drop_google_rating_info = '''
-    DROP TABLE IF EXISTS "Google Rating Info";
+    DROP TABLE IF EXISTS "Google_Rating_Info";
 '''
 
 create_google_rating_info = '''
     CREATE TABLE IF NOT EXISTS "Google_Rating_Info" (
         'place_id' TEXT PRIMARY KEY,
         'name' TEXT,
-        'formatted address' TEXT,
+        'formatted_address' TEXT,
         'rating' FLOAT NOT NULL,
         'user_ratings_total' INTEGER NOT NULL
     );
 '''
 
 drop_google_price_info = '''
-    DROP TABLE IF EXISTS "Google Price Info";
+    DROP TABLE IF EXISTS "Google_Price_Info";
 '''
 
 create_google_price_info = '''
     CREATE TABLE IF NOT EXISTS "Google_Price_Info" (
         'place_id' TEXT,
         'name' TEXT,
-        'formatted address' TEXT,
+        'formatted_address' TEXT,
         'price_level' TEXT,
         FOREIGN KEY (place_id) REFERENCES Google_Rating_Info (place_id)
     );
@@ -316,25 +317,24 @@ insert_yelp_price_info = '''
     VALUES (?, ?, ?, ?, ?, ?)
 '''
 
-
-cur.execute(drop_google_rating_info)
-cur.execute(create_google_rating_info)
-cur.execute(drop_google_price_info)
-cur.execute(create_google_price_info)
-
-cur.execute(drop_yelp_rating_info)
-cur.execute(create_yelp_rating_info)
-cur.execute(drop_yelp_price_info)
-cur.execute(create_yelp_price_info)
-
-conn.commit()
-
 if __name__ == "__main__":
 
     GOOGLE_CACHE_DICT = load_cache(GOOGLE_CACHE_FILE_NAME)
     YELP_CACHE_DICT = load_cache(YELP_CACHE_FILE_NAME)
 
     while True:
+
+        cur.execute(drop_google_rating_info)
+        cur.execute(create_google_rating_info)
+        cur.execute(drop_google_price_info)
+        cur.execute(create_google_price_info)
+
+        cur.execute(drop_yelp_rating_info)
+        cur.execute(create_yelp_rating_info)
+        cur.execute(drop_yelp_price_info)
+        cur.execute(create_yelp_price_info)
+
+        conn.commit()
 
         google_baseurl = "https://maps.googleapis.com/maps/api/place/textsearch/json?"
         yelp_baseurl = "https://api.yelp.com/v3/businesses/search"
@@ -380,6 +380,7 @@ if __name__ == "__main__":
                 yelp_data_for_ratings_info = []
                 yelp_data_for_price_info = []
 
+
                 for result in google_data["results"]:
                     place_id = result["place_id"]
                     name = result["name"]
@@ -402,10 +403,23 @@ if __name__ == "__main__":
                         display_address = str(business["location"]["display_address"][0]) + " " + str(business["location"]["display_address"][1])
                     except:
                         display_address = "N/A"
-                    rating = business["rating"]
-                    review_count = business["review_count"]
-                    phone = business["phone"]
-                    price = business["price"]
+                    try:
+                        rating = business["rating"]
+                    except:
+                        rating = "N/A"
+                    try:
+                        review_count = business["review_count"]
+                    except:
+                        review_count = "N/A"
+                    try:
+                        phone = business["phone"]
+                    except:
+                        phone = "N/A"
+                    
+                    try:
+                        price = business["price"]
+                    except:
+                        price = "N/A"
                     yelp_data_for_ratings_info.append([id_string, alias, name, display_address, rating, review_count])
                     yelp_data_for_price_info.append([id_string, alias, name, display_address, phone, price])
 
@@ -428,7 +442,507 @@ if __name__ == "__main__":
                 
                 conn.commit()
 
-                continue
+
+                while True:
+                    
+                    google_or_yelp_user_input = input("Enter 'GOOGLE' or 'YELP' to select graph data source, 'BACK' to search another city, or 'EXIT PROGRAM' to quit: ")
+
+                    if google_or_yelp_user_input.lower() == "exit program":
+                        quit()
+                    
+                    if google_or_yelp_user_input.lower() == "back":
+                        break
+
+                    if google_or_yelp_user_input.lower() != "exit program":
+                        if google_or_yelp_user_input.lower() != "back":
+                            if google_or_yelp_user_input.lower() != "google":
+                                if google_or_yelp_user_input.lower() != "yelp":
+                                    print("\n[Error] Invalid input.\n")
+                                    continue
+
+                    if google_or_yelp_user_input.lower() == "google" or "yelp":
+
+                        if google_or_yelp_user_input.lower() == "google":
+                            print("\nGoogle selected as graph data source.\n")
+
+                        elif google_or_yelp_user_input.lower() == "yelp":
+                            print("\nYelp selected as graph data source.\n")
+                            
+                        graph_display_user_input = input("Enter 'AVERAGE RATING' or 'AVERAGE NUMBER OF RATINGS' to see averages by price level, 'BACK' to search another city, or 'EXIT PROGRAM' to quit: ")
+
+                        if graph_display_user_input.lower() == "average rating":
+                            
+                            if google_or_yelp_user_input.lower() == "google":
+
+                                q1 = '''
+                                SELECT *
+                                FROM Google_Price_Info as g_price_i
+                                JOIN Google_Rating_Info as g_rating_i
+                                ON g_price_i.place_id = g_rating_i.place_id
+                                '''
+
+                                cur.execute(q1)
+                                conn.commit()
+                                google_user_rating_result = cur.fetchall()
+
+                                price_levels = ['0', '1', '2', '3', '4']
+                                average_user_ratings_by_price_level = []
+                                item_count_price_level_0 = 0
+                                item_count_price_level_1 = 0
+                                item_count_price_level_2 = 0
+                                item_count_price_level_3 = 0
+                                item_count_price_level_4 = 0
+                                user_ratings_sum_price_level_0 = 0
+                                user_ratings_sum_price_level_1 = 0
+                                user_ratings_sum_price_level_2 = 0
+                                user_ratings_sum_price_level_3 = 0
+                                user_ratings_sum_price_level_4 = 0
+                                price_levels_0 = []
+                                price_levels_1 = []
+                                price_levels_2 = []
+                                price_levels_3 = []
+                                price_levels_4 = []
+
+
+                                row_values_list = []
+                                for row in google_user_rating_result:
+                                    values_dict = {"price_level": row[3], "user_ratings_total": row[-1], "rating": row[-2]}
+                                    row_values_list.append(values_dict)
+                                
+                                    
+                                for values_dict in row_values_list:
+                                    if values_dict["price_level"] == price_levels[0]:
+                                        price_levels_0.append(values_dict)
+                                    if values_dict["price_level"] == price_levels[1]:
+                                        price_levels_1.append(values_dict)
+                                    if values_dict["price_level"] == price_levels[2]:
+                                        price_levels_2.append(values_dict)
+                                    if values_dict["price_level"] == price_levels[3]:
+                                        price_levels_3.append(values_dict)
+                                    if values_dict["price_level"] == price_levels[4]:
+                                        price_levels_4.append(values_dict)
+
+
+                                if len(price_levels_0) > 0:
+
+                                    for dict_item in price_levels_0:
+                                        item_count_price_level_0 += 1
+                                        user_ratings_sum_price_level_0 += float(dict_item["rating"])
+                                    
+                                        try:
+                                            user_ratings_average_for_price_level_0 = float(user_ratings_sum_price_level_0 / item_count_price_level_0)
+                                        except ZeroDivisionError:
+                                            user_ratings_average_for_price_level_0 = 0
+
+                                    average_user_ratings_by_price_level.append(user_ratings_average_for_price_level_0)
+                                
+                                else:
+                                    average_user_ratings_by_price_level.append(0)
+                            
+
+                                for dict_item in price_levels_1:
+                                    item_count_price_level_1 += 1
+                                    user_ratings_sum_price_level_1 += float(dict_item["rating"])
+
+                                    try:
+                                        user_ratings_average_for_price_level_1 = float(user_ratings_sum_price_level_1 / item_count_price_level_1)
+                                    except ZeroDivisionError:
+                                        user_ratings_average_for_price_level_1 = 0
+
+                                average_user_ratings_by_price_level.append(user_ratings_average_for_price_level_1)
+
+
+                                for dict_item in price_levels_2:
+                                    item_count_price_level_2 += 1
+                                    user_ratings_sum_price_level_2 += float(dict_item["rating"])
+
+                                    try:
+                                        user_ratings_average_for_price_level_2 = float(user_ratings_sum_price_level_2 / item_count_price_level_2)
+                                    except ZeroDivisionError:
+                                        user_ratings_average_for_price_level_2 = 0
+
+                                average_user_ratings_by_price_level.append(user_ratings_average_for_price_level_2)
+
+
+                                for dict_item in price_levels_3:
+                                    item_count_price_level_3 += 1
+                                    user_ratings_sum_price_level_3 += float(dict_item["rating"])
+
+                                    try:
+                                        user_ratings_average_for_price_level_3 = float(user_ratings_sum_price_level_3 / item_count_price_level_3)
+                                    except ZeroDivisionError:
+                                        user_ratings_average_for_price_level_3 = 0
+
+                                average_user_ratings_by_price_level.append(user_ratings_average_for_price_level_3)
+
+
+                                for dict_item in price_levels_4:
+                                    item_count_price_level_4 += 1
+                                    user_ratings_sum_price_level_4 += float(dict_item["rating"])
+
+                                    try:
+                                        user_ratings_average_for_price_level_4 = float(user_ratings_sum_price_level_4 / item_count_price_level_4)
+                                    except ZeroDivisionError:
+                                        user_ratings_average_for_price_level_4 = 0
+
+                                average_user_ratings_by_price_level.append(user_ratings_average_for_price_level_4)
+
+
+                                bar_data = go.Bar(x=price_levels, y=average_user_ratings_by_price_level)
+                                basic_layout = go.Layout(title=f"Average Google Ratings by Price Level for Restaurants in {search_term}", 
+                                                            xaxis_title = "Price Level from Least to Most Expensive (0 [free] to 4)",
+                                                            yaxis_title = "Average Google Rating (1 = lowest, 5 = highest)")
+                                fig = go.Figure(data=bar_data, layout=basic_layout)
+                                fig.show()
+                                print("\n\nSee graph in web browser.\n\n")
+                                continue
+
+
+
+                            elif google_or_yelp_user_input.lower() == "yelp":
+
+                                q2 = '''
+                                SELECT *
+                                FROM Yelp_Price_Info as y_price_i
+                                JOIN Yelp_Rating_Info as y_rating_i
+                                ON y_price_i.id = y_rating_i.id
+                                '''
+
+                                cur.execute(q2)
+                                conn.commit()
+                                yelp_user_rating_result = cur.fetchall()
+
+                                price_levels = ['$', '$$', '$$$', '$$$$']
+                                average_user_ratings_by_price_level = []
+                                item_count_price_level_0 = 0
+                                item_count_price_level_1 = 0
+                                item_count_price_level_2 = 0
+                                item_count_price_level_3 = 0
+                                user_ratings_sum_price_level_0 = 0
+                                user_ratings_sum_price_level_1 = 0
+                                user_ratings_sum_price_level_2 = 0
+                                user_ratings_sum_price_level_3 = 0
+                                price_levels_0 = []
+                                price_levels_1 = []
+                                price_levels_2 = []
+                                price_levels_3 = []
+
+                                row_values_list = []
+                                for row in yelp_user_rating_result:
+                                    values_dict = {"price": row[5], "review_count": row[-1], "rating": row[-2]}
+                                    row_values_list.append(values_dict)
+                                
+                                    
+                                for values_dict in row_values_list:
+                                    if values_dict["price"] == price_levels[0]:
+                                        price_levels_0.append(values_dict)
+                                    if values_dict["price"] == price_levels[1]:
+                                        price_levels_1.append(values_dict)
+                                    if values_dict["price"] == price_levels[2]:
+                                        price_levels_2.append(values_dict)
+                                    if values_dict["price"] == price_levels[3]:
+                                        price_levels_3.append(values_dict)
+
+
+                                for dict_item in price_levels_0:
+                                    item_count_price_level_0 += 1
+                                    user_ratings_sum_price_level_0 += float(dict_item["rating"])
+                                    
+                                    try:
+                                        user_ratings_average_for_price_level_0 = float(user_ratings_sum_price_level_0 / item_count_price_level_0)
+                                    except ZeroDivisionError:
+                                        user_ratings_average_for_price_level_0 = 0
+
+                                average_user_ratings_by_price_level.append(user_ratings_average_for_price_level_0)
+                                
+                            
+                                for dict_item in price_levels_1:
+                                    item_count_price_level_1 += 1
+                                    user_ratings_sum_price_level_1 += float(dict_item["rating"])
+
+                                    try:
+                                        user_ratings_average_for_price_level_1 = float(user_ratings_sum_price_level_1 / item_count_price_level_1)
+                                    except ZeroDivisionError:
+                                        user_ratings_average_for_price_level_1 = 0
+
+                                average_user_ratings_by_price_level.append(user_ratings_average_for_price_level_1)
+
+
+                                for dict_item in price_levels_2:
+                                    item_count_price_level_2 += 1
+                                    user_ratings_sum_price_level_2 += float(dict_item["rating"])
+
+                                    try:
+                                        user_ratings_average_for_price_level_2 = float(user_ratings_sum_price_level_2 / item_count_price_level_2)
+                                    except ZeroDivisionError:
+                                        user_ratings_average_for_price_level_2 = 0
+
+                                average_user_ratings_by_price_level.append(user_ratings_average_for_price_level_2)
+
+
+                                for dict_item in price_levels_3:
+                                    item_count_price_level_3 += 1
+                                    user_ratings_sum_price_level_3 += float(dict_item["rating"])
+
+                                    try:
+                                        user_ratings_average_for_price_level_3 = float(user_ratings_sum_price_level_3 / item_count_price_level_3)
+                                    except ZeroDivisionError:
+                                        user_ratings_average_for_price_level_3 = 0
+
+                                average_user_ratings_by_price_level.append(user_ratings_average_for_price_level_3)
+
+
+                                bar_data = go.Bar(x=price_levels, y=average_user_ratings_by_price_level)
+                                basic_layout = go.Layout(title=f"Average Yelp Ratings by Price Level for Restaurants in {search_term}", 
+                                                            xaxis_title = "Price Level from Least to Most Expensive ($ to $$$$)",
+                                                            yaxis_title = "Average Yelp Rating (1 = lowest, 5 = highest)")
+                                fig = go.Figure(data=bar_data, layout=basic_layout)
+                                fig.show()
+                                print("\n\nSee graph in web browser.\n\n")
+                                continue
+
+                            
+                        elif graph_display_user_input.lower() == "average number of ratings":
+                                
+                            if google_or_yelp_user_input.lower() == "google":
+
+                                q3 = '''
+                                SELECT *
+                                FROM Google_Price_Info as g_price_i
+                                JOIN Google_Rating_Info as g_rating_i
+                                ON g_price_i.place_id = g_rating_i.place_id
+                                '''
+
+                                cur.execute(q3)
+                                conn.commit()
+                                google_number_rating_result = cur.fetchall()
+                            
+                                price_levels = ['0', '1', '2', '3', '4']
+                                average_number_ratings_by_price_level = []
+                                item_count_price_level_0 = 0
+                                item_count_price_level_1 = 0
+                                item_count_price_level_2 = 0
+                                item_count_price_level_3 = 0
+                                item_count_price_level_4 = 0
+                                number_of_ratings_sum_price_level_0 = 0
+                                number_of_ratings_sum_price_level_1 = 0
+                                number_of_ratings_sum_price_level_2 = 0
+                                number_of_ratings_sum_price_level_3 = 0
+                                number_of_ratings_sum_price_level_4 = 0
+                                price_levels_0 = []
+                                price_levels_1 = []
+                                price_levels_2 = []
+                                price_levels_3 = []
+                                price_levels_4 = []
+
+
+                                row_values_list = []
+                                for row in google_number_rating_result:
+                                    values_dict = {"price_level": row[3], "user_ratings_total": row[-1], "rating": row[-2]}
+                                    row_values_list.append(values_dict)
+                                
+                                    
+                                for values_dict in row_values_list:
+                                    if values_dict["price_level"] == price_levels[0]:
+                                        price_levels_0.append(values_dict)
+                                    if values_dict["price_level"] == price_levels[1]:
+                                        price_levels_1.append(values_dict)
+                                    if values_dict["price_level"] == price_levels[2]:
+                                        price_levels_2.append(values_dict)
+                                    if values_dict["price_level"] == price_levels[3]:
+                                        price_levels_3.append(values_dict)
+                                    if values_dict["price_level"] == price_levels[4]:
+                                        price_levels_4.append(values_dict)
+
+
+                                if len(price_levels_0) > 0:
+
+                                    for dict_item in price_levels_0:
+                                        item_count_price_level_0 += 1
+                                        number_of_ratings_sum_price_level_0 += int(dict_item["user_ratings_total"])
+                                    
+                                        try:
+                                            number_of_ratings_average_for_price_level_0 = float(number_of_ratings_sum_price_level_0 / item_count_price_level_0)
+                                        except ZeroDivisionError:
+                                            number_of_ratings_average_for_price_level_0 = 0
+
+                                    average_number_ratings_by_price_level.append(number_of_ratings_average_for_price_level_0)
+                                
+                                else:
+                                    average_number_ratings_by_price_level.append(0)
+                            
+
+                                for dict_item in price_levels_1:
+                                    item_count_price_level_1 += 1
+                                    number_of_ratings_sum_price_level_1 += int(dict_item["user_ratings_total"])
+
+                                    try:
+                                        number_of_ratings_average_for_price_level_1 = float(number_of_ratings_sum_price_level_1 / item_count_price_level_1)
+                                    except ZeroDivisionError:
+                                        number_of_ratings_average_for_price_level_1 = 0
+
+                                average_number_ratings_by_price_level.append(number_of_ratings_average_for_price_level_1)
+
+
+                                for dict_item in price_levels_2:
+                                    item_count_price_level_2 += 1
+                                    number_of_ratings_sum_price_level_2 += int(dict_item["user_ratings_total"])
+                                    
+                                    try:
+                                        number_of_ratings_average_for_price_level_2 = float(number_of_ratings_sum_price_level_2 / item_count_price_level_2)
+                                    except ZeroDivisionError:
+                                        number_of_ratings_average_for_price_level_2 = 0
+
+                                average_number_ratings_by_price_level.append(number_of_ratings_average_for_price_level_2)
+
+
+                                for dict_item in price_levels_3:
+                                    item_count_price_level_3 += 1
+                                    number_of_ratings_sum_price_level_3 += int(dict_item["user_ratings_total"])
+                                    
+                                    try:
+                                        number_of_ratings_average_for_price_level_3 = float(number_of_ratings_sum_price_level_3 / item_count_price_level_3)
+                                    except ZeroDivisionError:
+                                        number_of_ratings_average_for_price_level_3 = 0
+
+                                average_number_ratings_by_price_level.append(number_of_ratings_average_for_price_level_3)
+
+
+                                for dict_item in price_levels_4:
+                                    item_count_price_level_4 += 1
+                                    number_of_ratings_sum_price_level_4 += int(dict_item["user_ratings_total"])
+                                    
+                                    try:
+                                        number_of_ratings_average_for_price_level_4 = float(number_of_ratings_sum_price_level_4 / item_count_price_level_4)
+                                    except ZeroDivisionError:
+                                        number_of_ratings_average_for_price_level_4 = 0
+                                        
+                                average_number_ratings_by_price_level.append(number_of_ratings_average_for_price_level_4)
+
+                                bar_data = go.Bar(x=price_levels, y=average_number_ratings_by_price_level)
+                                basic_layout = go.Layout(title=f"Average Number of Google User Ratings by Price Level for Restaurants in {search_term}", 
+                                                            xaxis_title = "Price Level from Least to Most Expensive (0 [free] to 4)",
+                                                            yaxis_title = "Average Number of Google User Ratings")
+                                fig = go.Figure(data=bar_data, layout=basic_layout)
+                                fig.show()
+                                print("\nSee graph in web browser.\n")
+                                continue
+
+
+                            elif google_or_yelp_user_input.lower() == "yelp":
+
+                                q4 = '''
+                                SELECT *
+                                FROM Yelp_Price_Info as y_price_i
+                                JOIN Yelp_Rating_Info as y_rating_i
+                                ON y_price_i.id = y_rating_i.id
+                                '''
+
+                                cur.execute(q4)
+                                conn.commit()
+                                yelp_number_rating_result = cur.fetchall()
+
+
+                                price_levels = ['$', '$$', '$$$', '$$$$']
+                                average_number_ratings_by_price_level = []
+                                item_count_price_level_0 = 0
+                                item_count_price_level_1 = 0
+                                item_count_price_level_2 = 0
+                                item_count_price_level_3 = 0
+                                number_ratings_sum_price_level_0 = 0
+                                number_ratings_sum_price_level_1 = 0
+                                number_ratings_sum_price_level_2 = 0
+                                number_ratings_sum_price_level_3 = 0
+                                price_levels_0 = []
+                                price_levels_1 = []
+                                price_levels_2 = []
+                                price_levels_3 = []
+
+
+                                row_values_list = []
+                                for row in yelp_number_rating_result:
+                                    values_dict = {"price": row[5], "review_count": row[-1], "rating": row[-2]}
+                                    row_values_list.append(values_dict)
+                                
+                                    
+                                for values_dict in row_values_list:
+                                    if values_dict["price"] == price_levels[0]:
+                                        price_levels_0.append(values_dict)
+                                    if values_dict["price"] == price_levels[1]:
+                                        price_levels_1.append(values_dict)
+                                    if values_dict["price"] == price_levels[2]:
+                                        price_levels_2.append(values_dict)
+                                    if values_dict["price"] == price_levels[3]:
+                                        price_levels_3.append(values_dict)
+
+
+                                for dict_item in price_levels_0:
+                                    item_count_price_level_0 += 1
+                                    number_ratings_sum_price_level_0 += float(dict_item["review_count"])
+                                    
+                                    try:
+                                        number_ratings_average_for_price_level_0 = float(number_ratings_sum_price_level_0 / item_count_price_level_0)
+                                    except ZeroDivisionError:
+                                        number_ratings_average_for_price_level_0 = 0
+
+                                average_number_ratings_by_price_level.append(number_ratings_average_for_price_level_0)
+                                
+                            
+                                for dict_item in price_levels_1:
+                                    item_count_price_level_1 += 1
+                                    number_ratings_sum_price_level_1 += float(dict_item["review_count"])
+                                    
+                                    try:
+                                        number_ratings_average_for_price_level_1 = float(number_ratings_sum_price_level_1 / item_count_price_level_1)
+                                    except ZeroDivisionError:
+                                        number_ratings_average_for_price_level_1 = 0
+
+                                average_number_ratings_by_price_level.append(number_ratings_average_for_price_level_1)
+
+
+                                for dict_item in price_levels_2:
+                                    item_count_price_level_2 += 1
+                                    number_ratings_sum_price_level_2 += float(dict_item["review_count"])
+                                    
+                                    try:
+                                        number_ratings_average_for_price_level_2 = float(number_ratings_sum_price_level_2 / item_count_price_level_2)
+                                    except ZeroDivisionError:
+                                        number_ratings_average_for_price_level_2 = 0
+
+                                average_number_ratings_by_price_level.append(number_ratings_average_for_price_level_2)
+
+
+                                for dict_item in price_levels_3:
+                                    item_count_price_level_3 += 1
+                                    number_ratings_sum_price_level_3 += float(dict_item["review_count"])
+                                    
+                                    try:
+                                        number_ratings_average_for_price_level_3 = float(number_ratings_sum_price_level_3 / item_count_price_level_3)
+                                    except ZeroDivisionError:
+                                        number_ratings_average_for_price_level_3 = 0
+
+                                average_number_ratings_by_price_level.append(number_ratings_average_for_price_level_3)
+
+
+                                bar_data = go.Bar(x=price_levels, y=average_number_ratings_by_price_level)
+                                basic_layout = go.Layout(title=f"Average Number of Yelp User Ratings by Price Level for Restaurants in {search_term}", 
+                                                            xaxis_title = "Price Level from Least to Most Expensive ($ to $$$$)",
+                                                            yaxis_title = "Average Number of Yelp User Ratings")
+                                fig = go.Figure(data=bar_data, layout=basic_layout)
+                                fig.show()
+                                print("\n\nSee graph in web browser.\n\n")
+                                continue
+
+
+                        elif graph_display_user_input.lower() == "back":
+                            break
+
+                        elif graph_display_user_input.lower() == "exit program":
+                            quit()
+
+                        else:
+                            print("\n[Error] Invalid input.\n")
+
 
 
 
